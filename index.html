@@ -6,7 +6,7 @@
       body {
         background: #111;
         color: #eee;
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        font-family: sans-serif;
         margin: 0;
         padding: 20px;
         display: flex;
@@ -15,7 +15,6 @@
       }
       h1 {
         color: #3498db;
-        margin-bottom: 10px;
       }
       .container {
         max-width: 900px;
@@ -29,9 +28,6 @@
         margin-bottom: 40px;
         padding-bottom: 20px;
         border-bottom: 1px solid #333;
-      }
-      section:last-child {
-        border-bottom: none;
       }
       .canvas-group {
         display: flex;
@@ -59,7 +55,6 @@
         background: #000;
         padding: 10px;
         border-radius: 4px;
-        font-size: 0.85rem;
       }
       b {
         color: #2ecc71;
@@ -70,39 +65,38 @@
     <h1>Newton Polynomial Interpolation</h1>
 
     <div class="container">
-      <!-- SECTION 1: SPATIAL PATH -->
       <section>
-        ### 1. Spatial Curve Mapping
-        <p>
-          The green object follows a $P(t)$ path calculated from 4 coordinate
-          points.
-        </p>
+        <h3>1. Spatial Curve Mapping</h3>
+        <p>The car follows the calculated polynomial path $P(t)$.</p>
         <canvas id="spatialCanvas" width="800" height="300"></canvas>
         <div class="debug" id="spatialDebug"></div>
       </section>
 
-      <!-- SECTION 2: FPS INTERPOLATION -->
       <section>
-        ### 2. Temporal Smoothing (30 vs 60 FPS)
+        <h3>2. Real-Time Logic vs. Interpolation</h3>
         <p>
-          Using <b>Divided Differences</b> to predict intermediate positions
-          between keyframes.
+          The Red car updates every <b>33.3ms (30 Ticks)</b>. The Green car
+          updates every <b>Refresh Frame</b>.
         </p>
         <div class="canvas-group">
           <div>
-            <div class="label">Step-based (Source)</div>
+            <div class="label">30Hz Raw Data (Stutter)</div>
             <canvas id="cvs30" width="400" height="200"></canvas>
           </div>
           <div>
-            <div class="label">Newton Interpolated (Smooth)</div>
+            <div class="label">Interpolated (Smooth)</div>
             <canvas id="cvs60" width="400" height="200"></canvas>
           </div>
         </div>
-        <div class="debug" id="fpsDebug"></div>
       </section>
     </div>
 
     <script>
+      // The SVG path data extracted from your SVG
+      const carPathData =
+        "M16,6l3,4h2c1.11,0,2,0.89,2,2v3h-2c0,1.66-1.34,3-3,3s-3-1.34-3-3H9c0,1.66-1.34,3-3,3s-3-1.34-3-3H1v-3c0-1.11,0.89-2,2-2l3-4H16 M10.5,7.5H6.75L4.86,10h5.64V7.5 M12,7.5V10h5.14l-1.89-2.5H12 M6,13.5c-0.83,0-1.5,0.67-1.5,1.5s0.67,1.5,1.5,1.5s1.5-0.67,1.5-1.5S6.83,13.5,6,13.5 M18,13.5c-0.83,0-1.5,0.67-1.5,1.5s0.67,1.5,1.5,1.5s1.5-0.67,1.5-1.5S18.83,13.5,18,13.5z";
+      const carPath = new Path2D(carPathData);
+
       class Newton {
         static getValues(points) {
           let n = points.length;
@@ -114,7 +108,6 @@
           }
           return y;
         }
-
         static compute(t, points, coef) {
           let res = coef[0];
           let p = 1;
@@ -126,7 +119,17 @@
         }
       }
 
-      // --- SETUP SPATIAL PATH ---
+      function drawCar(ctx, x, y, color, scale = 2) {
+        ctx.save();
+        // Translate to position and center the SVG (original is 24x24)
+        ctx.translate(x - 12 * scale, y - 12 * scale);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = color;
+        ctx.fill(carPath);
+        ctx.restore();
+      }
+
+      // --- INITIALIZE TOP GRAPH ---
       const sCvs = document.getElementById("spatialCanvas");
       const sCtx = sCvs.getContext("2d");
       const sPath = [
@@ -136,10 +139,10 @@
         { x: 4, y: 20 },
       ];
       const sCoefs = Newton.getValues(sPath);
-      let sT = 0;
-      let sDir = 0.015;
+      let sT = 0,
+        sDir = 0.015;
 
-      // --- SETUP FPS COMPARISON ---
+      // --- INITIALIZE BOTTOM COMPARISON ---
       const ctx30 = document.getElementById("cvs30").getContext("2d");
       const ctx60 = document.getElementById("cvs60").getContext("2d");
       const fPath = [
@@ -149,14 +152,15 @@
         { x: 3, y: 350 },
       ];
       const fCoefs = Newton.getValues(fPath);
-      let fT = 0;
-      let fDir = 0.02;
+      let fT = 0,
+        fDir = 0.02,
+        lastTickTime = 0,
+        stutterPos = 0;
+      const tickRate = 1000 / 30;
 
-      function mainLoop() {
-        // --- UPDATE SPATIAL ---
+      function mainLoop(currentTime) {
+        // 1. TOP SPATIAL CANVAS
         sCtx.clearRect(0, 0, sCvs.width, sCvs.height);
-
-        // Draw Curve Background
         sCtx.strokeStyle = "#333";
         sCtx.beginPath();
         for (let xV = 0; xV <= 4; xV += 0.05) {
@@ -164,54 +168,33 @@
         }
         sCtx.stroke();
 
-        // Draw Nodes
-        sCtx.fillStyle = "#3498db";
-        sPath.forEach((p) => {
-          sCtx.beginPath();
-          sCtx.arc(p.x * 200, p.y, 5, 0, Math.PI * 2);
-          sCtx.fill();
-        });
-
-        // Draw Moving Object
         let curY = Newton.compute(sT, sPath, sCoefs);
-        sCtx.fillStyle = "#2ecc71";
-        sCtx.beginPath();
-        sCtx.arc(sT * 200, curY, 12, 0, Math.PI * 2);
-        sCtx.fill();
+        drawCar(sCtx, sT * 200, curY, "#2ecc71", 2.5);
 
         document.getElementById("spatialDebug").innerText =
-          `Spatial -> t: ${sT.toFixed(2)} | P(t): ${curY.toFixed(2)}`;
-
+          `Car X: ${(sT * 200).toFixed(0)} | Car Y: ${curY.toFixed(0)}`;
         sT += sDir;
         if (sT >= 4 || sT <= 0) sDir *= -1;
 
-        // --- UPDATE FPS COMPARISON ---
+        // 2. BOTTOM COMPARISON
+        if (currentTime - lastTickTime >= tickRate) {
+          stutterPos = Newton.compute(fT, fPath, fCoefs);
+          lastTickTime = currentTime;
+        }
+        let interpolatedPos = Newton.compute(fT, fPath, fCoefs);
+
         ctx30.clearRect(0, 0, 400, 200);
         ctx60.clearRect(0, 0, 400, 200);
 
-        let pos30 = Newton.compute(Math.floor(fT), fPath, fCoefs);
-        let pos60 = Newton.compute(fT, fPath, fCoefs);
-
-        ctx30.fillStyle = "#e74c3c";
-        ctx30.beginPath();
-        ctx30.arc(pos30, 100, 20, 0, Math.PI * 2);
-        ctx30.fill();
-
-        ctx60.fillStyle = "#2ecc71";
-        ctx60.beginPath();
-        ctx60.arc(pos60, 100, 20, 0, Math.PI * 2);
-        ctx60.fill();
-
-        document.getElementById("fpsDebug").innerText =
-          `Coefficients: [${fCoefs.map((c) => c.toFixed(2)).join(", ")}]`;
+        drawCar(ctx30, stutterPos, 100, "#e74c3c", 3);
+        drawCar(ctx60, interpolatedPos, 100, "#2ecc71", 3);
 
         fT += fDir;
         if (fT >= 3 || fT <= 0) fDir *= -1;
 
         requestAnimationFrame(mainLoop);
       }
-
-      mainLoop();
+      requestAnimationFrame(mainLoop);
     </script>
   </body>
 </html>
