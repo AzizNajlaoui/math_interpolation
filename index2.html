@@ -1,0 +1,217 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Newton Interpolation Dashboard</title>
+    <style>
+      body {
+        background: #111;
+        color: #eee;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      h1 {
+        color: #3498db;
+        margin-bottom: 10px;
+      }
+      .container {
+        max-width: 900px;
+        width: 100%;
+        background: #1a1a1a;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+      section {
+        margin-bottom: 40px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid #333;
+      }
+      section:last-child {
+        border-bottom: none;
+      }
+      .canvas-group {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 15px;
+      }
+      canvas {
+        border: 2px solid #3498db;
+        background: #000;
+        border-radius: 8px;
+      }
+      .label {
+        font-weight: bold;
+        color: #3498db;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        font-size: 0.9rem;
+      }
+      .debug {
+        margin-top: 15px;
+        font-family: monospace;
+        color: #2ecc71;
+        background: #000;
+        padding: 10px;
+        border-radius: 4px;
+        font-size: 0.85rem;
+      }
+      b {
+        color: #2ecc71;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Newton Polynomial Interpolation</h1>
+
+    <div class="container">
+      <!-- SECTION 1: SPATIAL PATH -->
+      <section>
+        ### 1. Spatial Curve Mapping
+        <p>
+          The green object follows a $P(t)$ path calculated from 4 coordinate
+          points.
+        </p>
+        <canvas id="spatialCanvas" width="800" height="300"></canvas>
+        <div class="debug" id="spatialDebug"></div>
+      </section>
+
+      <!-- SECTION 2: FPS INTERPOLATION -->
+      <section>
+        ### 2. Temporal Smoothing (30 vs 60 FPS)
+        <p>
+          Using <b>Divided Differences</b> to predict intermediate positions
+          between keyframes.
+        </p>
+        <div class="canvas-group">
+          <div>
+            <div class="label">Step-based (Source)</div>
+            <canvas id="cvs30" width="400" height="200"></canvas>
+          </div>
+          <div>
+            <div class="label">Newton Interpolated (Smooth)</div>
+            <canvas id="cvs60" width="400" height="200"></canvas>
+          </div>
+        </div>
+        <div class="debug" id="fpsDebug"></div>
+      </section>
+    </div>
+
+    <script>
+      class Newton {
+        static getValues(points) {
+          let n = points.length;
+          let y = points.map((p) => p.y);
+          for (let i = 1; i < n; i++) {
+            for (let j = n - 1; j >= i; j--) {
+              y[j] = (y[j] - y[j - 1]) / (points[j].x - points[j - i].x);
+            }
+          }
+          return y;
+        }
+
+        static compute(t, points, coef) {
+          let res = coef[0];
+          let p = 1;
+          for (let i = 1; i < coef.length; i++) {
+            p *= t - points[i - 1].x;
+            res += coef[i] * p;
+          }
+          return res;
+        }
+      }
+
+      // --- SETUP SPATIAL PATH ---
+      const sCvs = document.getElementById("spatialCanvas");
+      const sCtx = sCvs.getContext("2d");
+      const sPath = [
+        { x: 0, y: 250 },
+        { x: 1, y: 50 },
+        { x: 2, y: 150 },
+        { x: 4, y: 20 },
+      ];
+      const sCoefs = Newton.getValues(sPath);
+      let sT = 0;
+      let sDir = 0.015;
+
+      // --- SETUP FPS COMPARISON ---
+      const ctx30 = document.getElementById("cvs30").getContext("2d");
+      const ctx60 = document.getElementById("cvs60").getContext("2d");
+      const fPath = [
+        { x: 0, y: 50 },
+        { x: 1, y: 80 },
+        { x: 2, y: 320 },
+        { x: 3, y: 350 },
+      ];
+      const fCoefs = Newton.getValues(fPath);
+      let fT = 0;
+      let fDir = 0.02;
+
+      function mainLoop() {
+        // --- UPDATE SPATIAL ---
+        sCtx.clearRect(0, 0, sCvs.width, sCvs.height);
+
+        // Draw Curve Background
+        sCtx.strokeStyle = "#333";
+        sCtx.beginPath();
+        for (let xV = 0; xV <= 4; xV += 0.05) {
+          sCtx.lineTo(xV * 200, Newton.compute(xV, sPath, sCoefs));
+        }
+        sCtx.stroke();
+
+        // Draw Nodes
+        sCtx.fillStyle = "#3498db";
+        sPath.forEach((p) => {
+          sCtx.beginPath();
+          sCtx.arc(p.x * 200, p.y, 5, 0, Math.PI * 2);
+          sCtx.fill();
+        });
+
+        // Draw Moving Object
+        let curY = Newton.compute(sT, sPath, sCoefs);
+        sCtx.fillStyle = "#2ecc71";
+        sCtx.beginPath();
+        sCtx.arc(sT * 200, curY, 12, 0, Math.PI * 2);
+        sCtx.fill();
+
+        document.getElementById("spatialDebug").innerText =
+          `Spatial -> t: ${sT.toFixed(2)} | P(t): ${curY.toFixed(2)}`;
+
+        sT += sDir;
+        if (sT >= 4 || sT <= 0) sDir *= -1;
+
+        // --- UPDATE FPS COMPARISON ---
+        ctx30.clearRect(0, 0, 400, 200);
+        ctx60.clearRect(0, 0, 400, 200);
+
+        let pos30 = Newton.compute(Math.floor(fT), fPath, fCoefs);
+        let pos60 = Newton.compute(fT, fPath, fCoefs);
+
+        ctx30.fillStyle = "#e74c3c";
+        ctx30.beginPath();
+        ctx30.arc(pos30, 100, 20, 0, Math.PI * 2);
+        ctx30.fill();
+
+        ctx60.fillStyle = "#2ecc71";
+        ctx60.beginPath();
+        ctx60.arc(pos60, 100, 20, 0, Math.PI * 2);
+        ctx60.fill();
+
+        document.getElementById("fpsDebug").innerText =
+          `Coefficients: [${fCoefs.map((c) => c.toFixed(2)).join(", ")}]`;
+
+        fT += fDir;
+        if (fT >= 3 || fT <= 0) fDir *= -1;
+
+        requestAnimationFrame(mainLoop);
+      }
+
+      mainLoop();
+    </script>
+  </body>
+</html>
